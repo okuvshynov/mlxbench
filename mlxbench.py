@@ -187,7 +187,7 @@ def setup_arg_parser():
     parser.add_argument(
         "--model",
         type=str,
-        help="The path to the local model directory or Hugging Face repo.",
+        help="The path to the local model directory or Hugging Face repo (supports comma-separated list).",
         default="mlx-community/Llama-3.2-3B-Instruct-4bit",
     )
     parser.add_argument(
@@ -439,12 +439,8 @@ def main():
 
     tokenizer_config = {"trust_remote_code" : True}
 
-    model, tokenizer = load(
-        args.model,
-        tokenizer_config=tokenizer_config,
-    )
-    if not isinstance(tokenizer, TokenizerWrapper):
-        tokenizer = TokenizerWrapper(tokenizer)
+    # Parse comma-separated model list
+    model_list = [m.strip() for m in args.model.split(',')]
 
     # Get the base prompt text
     base_prompt = args.prompt.replace("\\n", "\n").replace("\\t", "\t")
@@ -454,7 +450,7 @@ def main():
     param_combinations = generate_param_combinations(args)
     
     # Build CSV header dynamically
-    header_parts = ["run"]
+    header_parts = ["run", "model"]
     # Add benchmark parameter columns
     for param in BENCHMARK_PARAMS:
         header_parts.append(param.name)
@@ -462,54 +458,63 @@ def main():
     header_parts.extend(["prompt_tokens", "prompt_tps", "generation_tokens", "generation_tps", "peak_memory_gb"])
     print(",".join(header_parts))
     
-    # Run benchmarks for all combinations
+    # Run benchmarks for all models and combinations
     run_idx = 0
-    for combination in param_combinations:
-        # Prepare prompt with the current n_prompt value
-        n_prompt = combination["n_prompt"]
-        prompt = prepare_prompt(base_prompt, tokenizer, n_prompt)
+    for model_path in model_list:
+        # Load model once per model to avoid setup costs between iterations
+        model, tokenizer = load(
+            model_path,
+            tokenizer_config=tokenizer_config,
+        )
+        if not isinstance(tokenizer, TokenizerWrapper):
+            tokenizer = TokenizerWrapper(tokenizer)
         
-        # Run the benchmark multiple times according to repeats
-        for repeat in range(args.repeats):
-            run_idx += 1
+        for combination in param_combinations:
+            # Prepare prompt with the current n_prompt value
+            n_prompt = combination["n_prompt"]
+            prompt = prepare_prompt(base_prompt, tokenizer, n_prompt)
             
-            if args.verbose:
-                print("=" * 10)
-            
-            # Collect benchmark parameters for generate()
-            generate_kwargs = {}
-            for param in BENCHMARK_PARAMS:
-                # Skip n_prompt as it's used for prompt preparation, not generation
-                if param.name != "n_prompt":
-                    generate_kwargs[param.name] = combination[param.name]
-            
-            response = generate(
-                model,
-                tokenizer,
-                prompt,
-                verbose=args.verbose,
-                **generate_kwargs
-            )
-            
-            if args.verbose:
-                print()
-                print("=" * 10)
-            
-            # Build CSV row dynamically
-            row_parts = [str(run_idx)]
-            # Add benchmark parameter values from current combination
-            for param in BENCHMARK_PARAMS:
-                value = combination[param.name]
-                row_parts.append(str(value))
-            # Add performance metrics
-            row_parts.extend([
-                str(response.prompt_tokens),
-                f"{response.prompt_tps:.3f}",
-                str(response.generation_tokens),
-                f"{response.generation_tps:.3f}",
-                f"{response.peak_memory:.3f}"
-            ])
-            print(",".join(row_parts))
+            # Run the benchmark multiple times according to repeats
+            for repeat in range(args.repeats):
+                run_idx += 1
+                
+                if args.verbose:
+                    print("=" * 10)
+                
+                # Collect benchmark parameters for generate()
+                generate_kwargs = {}
+                for param in BENCHMARK_PARAMS:
+                    # Skip n_prompt as it's used for prompt preparation, not generation
+                    if param.name != "n_prompt":
+                        generate_kwargs[param.name] = combination[param.name]
+                
+                response = generate(
+                    model,
+                    tokenizer,
+                    prompt,
+                    verbose=args.verbose,
+                    **generate_kwargs
+                )
+                
+                if args.verbose:
+                    print()
+                    print("=" * 10)
+                
+                # Build CSV row dynamically
+                row_parts = [str(run_idx), model_path]
+                # Add benchmark parameter values from current combination
+                for param in BENCHMARK_PARAMS:
+                    value = combination[param.name]
+                    row_parts.append(str(value))
+                # Add performance metrics
+                row_parts.extend([
+                    str(response.prompt_tokens),
+                    f"{response.prompt_tps:.3f}",
+                    str(response.generation_tokens),
+                    f"{response.generation_tps:.3f}",
+                    f"{response.peak_memory:.3f}"
+                ])
+                print(",".join(row_parts))
 
 if __name__ == "__main__":
     main()
