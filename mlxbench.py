@@ -38,18 +38,6 @@ class BenchmarkParam:
     default: Any  # Default value
     help: str  # Help text for argparse
     arg_kwargs: Dict[str, Any] = field(default_factory=dict)  # Additional argparse kwargs
-    csv_name: Optional[str] = None  # Name for CSV column (defaults to name)
-    csv_format: Optional[Callable[[Any], str]] = None  # Custom formatter for CSV output
-    
-    def get_csv_name(self) -> str:
-        """Get the name to use in CSV header."""
-        return self.csv_name or self.name
-    
-    def format_csv_value(self, value: Any) -> str:
-        """Format the value for CSV output."""
-        if self.csv_format:
-            return self.csv_format(value)
-        return str(value)
 
 
 # Registry of benchmark parameters that affect individual runs
@@ -64,7 +52,6 @@ BENCHMARK_PARAMS = [
         arg_type=int,
         default=1000,
         help="Target number of tokens for the prompt",
-        csv_name="prompt_tokens_target",
     ),
     BenchmarkParam(
         name="n_generate",
@@ -72,7 +59,6 @@ BENCHMARK_PARAMS = [
         arg_type=int,
         default=100,
         help="Number of tokens to generate",
-        csv_name="generation_tokens_target",
     ),
     BenchmarkParam(
         name="max_kv_size",
@@ -414,7 +400,7 @@ def main():
     header_parts = ["run"]
     # Add benchmark parameter columns
     for param in BENCHMARK_PARAMS:
-        header_parts.append(param.get_csv_name())
+        header_parts.append(param.name)
     # Add performance metric columns
     header_parts.extend(["prompt_tokens", "prompt_tps", "generation_tokens", "generation_tps", "peak_memory_gb"])
     print(",".join(header_parts))
@@ -447,7 +433,7 @@ def main():
         # Add benchmark parameter values
         for param in BENCHMARK_PARAMS:
             value = getattr(args, param.name)
-            row_parts.append(param.format_csv_value(value))
+            row_parts.append(str(value))
         # Add performance metrics
         row_parts.extend([
             str(response.prompt_tokens),
