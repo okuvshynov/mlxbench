@@ -400,6 +400,7 @@ def generate(
     Returns:
         PerfMetrics: An instance containing the final generation metadata.
     """
+    mx.reset_peak_memory()
     prompt = mx.array(prompt)
 
     detokenizer = tokenizer.detokenizer
