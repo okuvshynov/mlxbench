@@ -8,11 +8,15 @@ import contextlib
 import functools
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
+    Any,
+    Callable,
+    Dict,
     Generator,
     List,
     Optional,
+    Union,
 )
 
 import mlx.core as mx
@@ -23,6 +27,89 @@ from mlx_lm.models import cache
 from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from mlx_lm.utils import load
+
+
+@dataclass
+class BenchmarkParam:
+    """Configuration for a benchmark parameter."""
+    name: str  # Parameter name for argparse and generate()
+    arg_names: List[str]  # List of argument names/shortcuts for argparse
+    arg_type: type  # Type for argparse
+    default: Any  # Default value
+    help: str  # Help text for argparse
+    arg_kwargs: Dict[str, Any] = field(default_factory=dict)  # Additional argparse kwargs
+    csv_name: Optional[str] = None  # Name for CSV column (defaults to name)
+    csv_format: Optional[Callable[[Any], str]] = None  # Custom formatter for CSV output
+    
+    def get_csv_name(self) -> str:
+        """Get the name to use in CSV header."""
+        return self.csv_name or self.name
+    
+    def format_csv_value(self, value: Any) -> str:
+        """Format the value for CSV output."""
+        if self.csv_format:
+            return self.csv_format(value)
+        return str(value)
+
+
+# Registry of benchmark parameters that affect individual runs
+# To add a new parameter:
+# 1. Add a BenchmarkParam entry here with proper configuration
+# 2. Make sure generate_step() or generate() functions accept the parameter
+# 3. The parameter will automatically appear in CSV output and argparse
+BENCHMARK_PARAMS = [
+    BenchmarkParam(
+        name="n_prompt",
+        arg_names=["--n-prompt", "-np"],
+        arg_type=int,
+        default=1000,
+        help="Target number of tokens for the prompt",
+        csv_name="prompt_tokens_target",
+    ),
+    BenchmarkParam(
+        name="n_generate",
+        arg_names=["--n-generate", "-n"],
+        arg_type=int,
+        default=100,
+        help="Number of tokens to generate",
+        csv_name="generation_tokens_target",
+    ),
+    BenchmarkParam(
+        name="max_kv_size",
+        arg_names=["--max-kv-size"],
+        arg_type=int,
+        default=None,
+        help="Set the maximum key-value cache size",
+    ),
+    BenchmarkParam(
+        name="kv_bits",
+        arg_names=["--kv-bits"],
+        arg_type=int,
+        default=None,
+        help="Number of bits for KV cache quantization. Defaults to no quantization.",
+    ),
+    BenchmarkParam(
+        name="kv_group_size",
+        arg_names=["--kv-group-size"],
+        arg_type=int,
+        default=64,
+        help="Group size for KV cache quantization.",
+    ),
+    BenchmarkParam(
+        name="quantized_kv_start",
+        arg_names=["--quantized-kv-start"],
+        arg_type=int,
+        default=0,
+        help="When --kv-bits is set, start quantizing the KV cache from this step onwards.",
+    ),
+    BenchmarkParam(
+        name="prefill_step_size",
+        arg_names=["--prefill-step-size", "-pss"],
+        arg_type=int,
+        default=2048,
+        help="Number of tokens to process at once during prompt prefill",
+    ),
+]
 
 
 def prepare_prompt(args, tokenizer) -> List[int]:
@@ -58,6 +145,8 @@ def prepare_prompt(args, tokenizer) -> List[int]:
 def setup_arg_parser():
     """Set up and return the argument parser."""
     parser = argparse.ArgumentParser(description="LLM inference script")
+    
+    # Add model and prompt arguments (not part of benchmark params)
     parser.add_argument(
         "--model",
         type=str,
@@ -70,53 +159,18 @@ def setup_arg_parser():
         default="The quick brown fox jumps over the lazy dog. ",
         help="Base prompt text to repeat ('-' reads from stdin)",
     )
-    parser.add_argument(
-        "--n-prompt",
-        "-np",
-        type=int,
-        default=1000,
-        help="Target number of tokens for the prompt",
-    )
-    parser.add_argument(
-        "--n-generate",
-        "-n",
-        type=int,
-        default=100,
-        help="Number of tokens to generate",
-    )
-    parser.add_argument(
-        "--max-kv-size",
-        type=int,
-        help="Set the maximum key-value cache size",
-        default=None,
-    )
-    parser.add_argument(
-        "--kv-bits",
-        type=int,
-        help="Number of bits for KV cache quantization. "
-        "Defaults to no quantization.",
-        default=None,
-    )
-    parser.add_argument(
-        "--kv-group-size",
-        type=int,
-        help="Group size for KV cache quantization.",
-        default=64,
-    )
-    parser.add_argument(
-        "--quantized-kv-start",
-        help="When --kv-bits is set, start quantizing the KV cache "
-        "from this step onwards.",
-        type=int,
-        default=0,
-    )
-    parser.add_argument(
-        "--prefill-step-size",
-        "-pss",
-        help="Number of tokens to process at once during prompt prefill",
-        type=int,
-        default=2048,
-    )
+    
+    # Add benchmark parameters from registry
+    for param in BENCHMARK_PARAMS:
+        parser.add_argument(
+            *param.arg_names,
+            type=param.arg_type,
+            default=param.default,
+            help=param.help,
+            **param.arg_kwargs
+        )
+    
+    # Add non-benchmark parameters (verbose and repeats)
     parser.add_argument(
         "--verbose",
         "-v",
@@ -130,6 +184,7 @@ def setup_arg_parser():
         default=1,
         help="Number of times to repeat the benchmark",
     )
+    
     return parser
 
 
@@ -355,32 +410,53 @@ def main():
 
     prompt = prepare_prompt(args, tokenizer)
 
-    # Print CSV header
-    print("run,prompt_tokens,prompt_tps,generation_tokens,generation_tps,peak_memory_gb")
+    # Build CSV header dynamically
+    header_parts = ["run"]
+    # Add benchmark parameter columns
+    for param in BENCHMARK_PARAMS:
+        header_parts.append(param.get_csv_name())
+    # Add performance metric columns
+    header_parts.extend(["prompt_tokens", "prompt_tps", "generation_tokens", "generation_tps", "peak_memory_gb"])
+    print(",".join(header_parts))
     
     for run_idx in range(args.repeats):
         if args.verbose:
             print("=" * 10)
+        
+        # Collect benchmark parameters for generate()
+        generate_kwargs = {}
+        for param in BENCHMARK_PARAMS:
+            # Skip n_prompt as it's used for prompt preparation, not generation
+            if param.name != "n_prompt":
+                generate_kwargs[param.name] = getattr(args, param.name)
         
         response = generate(
             model,
             tokenizer,
             prompt,
             verbose=args.verbose,
-            n_generate=args.n_generate,
-            max_kv_size=args.max_kv_size,
-            kv_bits=args.kv_bits,
-            kv_group_size=args.kv_group_size,
-            quantized_kv_start=args.quantized_kv_start,
-            prefill_step_size=args.prefill_step_size,
+            **generate_kwargs
         )
         
         if args.verbose:
             print()
             print("=" * 10)
         
-        # Print CSV row
-        print(f"{run_idx + 1},{response.prompt_tokens},{response.prompt_tps:.3f},{response.generation_tokens},{response.generation_tps:.3f},{response.peak_memory:.3f}")
+        # Build CSV row dynamically
+        row_parts = [str(run_idx + 1)]
+        # Add benchmark parameter values
+        for param in BENCHMARK_PARAMS:
+            value = getattr(args, param.name)
+            row_parts.append(param.format_csv_value(value))
+        # Add performance metrics
+        row_parts.extend([
+            str(response.prompt_tokens),
+            f"{response.prompt_tps:.3f}",
+            str(response.generation_tokens),
+            f"{response.generation_tps:.3f}",
+            f"{response.peak_memory:.3f}"
+        ])
+        print(",".join(row_parts))
 
 if __name__ == "__main__":
     main()
