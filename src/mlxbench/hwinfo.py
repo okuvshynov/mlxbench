@@ -97,11 +97,13 @@ def format_hwinfo(hwinfo: Dict) -> str:
         model = chip.replace('Apple ', '')
     else:
         model = chip
+
+    model = model.lower().replace(' ', '')
     
-    memory = hwinfo.get('total_memory_gb', 0)
-    gpu_cores = hwinfo.get('gpu_core_count', 0)
+    memory = int(hwinfo.get('total_memory_gb', 0))
+    gpu_cores = int(hwinfo.get('gpu_core_count', 0))
     
-    return f"{model} | {memory}GB | {gpu_cores} GPU cores"
+    return f"{model}_{memory}gb_{gpu_cores}gpu"
 
 
 if __name__ == '__main__':
