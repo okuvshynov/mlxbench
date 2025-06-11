@@ -29,7 +29,10 @@ The script outputs CSV data with columns:
 
 ## Architecture
 
-The codebase consists of a single mlxbench.py file that:
+The codebase consists of two main components:
+
+### mlxbench.py
+Main benchmarking script that:
 1. Loads MLX models using mlx_lm.utils.load
 2. Tokenizes and prepares prompts by repeating base text to reach target length
 3. Generates tokens using a custom generate_step generator with KV cache support
@@ -43,3 +46,15 @@ Key functions:
 - `wired_limit()`: Context manager for handling memory limits on Apple Silicon
 
 The implementation uses MLX streams for efficient async evaluation and supports KV cache quantization for memory optimization.
+
+### hwinfo.py
+Hardware information utility that:
+1. Detects Apple Silicon chips and their specifications
+2. Gathers CPU core counts (performance and efficiency cores)
+3. Extracts GPU core count using ioreg
+4. Reports total system memory
+5. Provides formatted output for easy display
+
+Key functions:
+- `apple_hwinfo()`: Returns comprehensive hardware information as a dictionary
+- `format_hwinfo()`: Formats hardware info into a concise string (e.g., "M2 Ultra | 192.0GB | 76 GPU cores")
