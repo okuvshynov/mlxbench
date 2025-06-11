@@ -1,3 +1,5 @@
+# Copyright © 2025 Oleksandr Kuvshynov
+
 import platform
 import subprocess
 import re
@@ -16,8 +18,7 @@ def apple_hwinfo() -> Dict:
         'performance_cores': None,
         'efficiency_cores': None,
         'gpu_core_count': None,
-        'total_memory_gb': None,
-        'running_under_rosetta': False
+        'total_memory_gb': None
     }
     
     # Check for Apple Silicon using multiple methods
@@ -76,16 +77,6 @@ def apple_hwinfo() -> Dict:
                     result['gpu_core_count'] = int(match.group(1))
             except:
                 pass
-    except:
-        pass
-    
-    # Check for Rosetta translation
-    try:
-        rosetta_result = subprocess.run(
-            ['sysctl', '-n', 'sysctl.proc_translated'],
-            capture_output=True, text=True, check=True
-        )
-        result['running_under_rosetta'] = int(rosetta_result.stdout.strip()) == 1
     except:
         pass
     
