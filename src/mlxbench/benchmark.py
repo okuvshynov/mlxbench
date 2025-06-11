@@ -29,6 +29,8 @@ from mlx_lm.sample_utils import make_sampler
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from mlx_lm.utils import load
 
+from .hwinfo import apple_hwinfo, format_hwinfo
+
 
 @dataclass
 class BenchmarkParam:
@@ -437,6 +439,10 @@ def main():
     parser = setup_arg_parser()
     args = parser.parse_args()
 
+    # Get hardware info for the CSV column
+    hw_info = apple_hwinfo()
+    hw_model = format_hwinfo(hw_info)
+
     tokenizer_config = {"trust_remote_code" : True}
 
     # Parse comma-separated model list
@@ -450,7 +456,7 @@ def main():
     param_combinations = generate_param_combinations(args)
     
     # Build CSV header dynamically
-    header_parts = ["run", "model"]
+    header_parts = ["run", "model", "hw_model"]
     # Add benchmark parameter columns
     for param in BENCHMARK_PARAMS:
         header_parts.append(param.name)
@@ -501,7 +507,7 @@ def main():
                     print("=" * 10)
                 
                 # Build CSV row dynamically
-                row_parts = [str(run_idx), model_path]
+                row_parts = [str(run_idx), model_path, hw_model]
                 # Add benchmark parameter values from current combination
                 for param in BENCHMARK_PARAMS:
                     value = combination[param.name]
