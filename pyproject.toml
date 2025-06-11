@@ -28,6 +28,7 @@ dependencies = [
     "mlx-lm>=0.12.0",
     "numpy",
     "tiktoken",
+    "transformers>=4.52.4"
 ]
 
 [project.optional-dependencies]
