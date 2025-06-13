@@ -411,6 +411,9 @@ def generate(
     with wired_limit(model, [generation_stream]):
         detokenizer.reset()
         tic = time.perf_counter()
+        # NOTE: completion of prompt processing also produces
+        # logits for first token.
+
         for n, token in enumerate(token_generator):
             if n == 0:
                 prompt_time = time.perf_counter() - tic
@@ -430,7 +433,10 @@ def generate(
             prompt_tokens=prompt.size,
             prompt_tps=prompt_tps,
             generation_tokens=n + 1,
-            generation_tps=(n + 1) / (time.perf_counter() - tic),
+            # first token is completed as part of prompt processing, therefore we do not
+            # count it here. If we were using (n+1) here, we'd get different TPS
+            # for generation of lengths 2,3,4,5.  
+            generation_tps=n / (time.perf_counter() - tic), 
             peak_memory=mx.get_peak_memory() / 1e9,
         )
 
